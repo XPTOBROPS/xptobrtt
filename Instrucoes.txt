@@ -1,0 +1,220 @@
+I want you to implement, using **TDD**, a **Tic-Tac-Toe** system **preserving the provided project structure** (Java + Spring Boot with Gradle). **Do not change the existing directory/package structure**; only **add** classes and files as needed. **Reuse** what already exists under `config/` and `exception/` (for example, `ModelMapper`, `ObjectMapper` with `JavaTimeModule`, `ErrorHandlingControllerAdvice`, `CustomErrorType`, `CalculatorException` — you may rename/duplicate exceptions for the game context if you prefer, but **do not remove** the originals).
+
+### Objective (Project theme)
+
+Allow **two users** to enter their names and play Tic-Tac-Toe:
+
+* Player 1 marks **X**, Player 2 marks **O**.
+* Each move specifies a **position from 1 to 9**.
+* The system **displays the board after each move**.
+* It checks for a **winner** after every move (rows, columns, diagonals).
+* At the end, if no one has won after 9 moves, declare a **draw**.
+* There must be an **option to play again** (reset the match, with or without keeping player names).
+
+### Constraints and stack preservation
+
+* Stack: **Java + Spring Boot (Gradle)** (as in the project).
+* **Do not change** the base structure (the `Application` class, `ServletInitializer`, `config/` and `exception/` packages).
+* **Keep** the technologies present in the project: **Lombok**, **ModelMapper**, **springdoc-openapi** (Swagger UI), **Jakarta Validation**, **H2** (it’s fine to keep the dependency; the game logic can be **in-memory**, without JPA).
+* If `build.gradle` is missing required dependencies, **add only the minimum** to compile and test (web, validation, lombok, modelmapper, springdoc, h2 runtime, test, mockito, spring-test, jacoco). **Do not remove** existing plugins. If there is a Spring Boot snapshot version, **pin it to a current stable** compatible version (e.g., 3.3.x) **without changing the structure**.
+
+### Suggested architecture (without changing folder structure)
+
+Create new packages if needed (following the project’s pattern):
+
+* `controller/` – REST controllers.
+* `service/` – game business rules (unit tests here).
+* `domain/` (or `model/`) – simple domain models: `Game`, `Player`, `Board`.
+* `dto/` – request/response DTOs (use `@Valid` and `jakarta.validation`).
+* (Optional) `mapper/` – ModelMapper mappings, if useful.
+
+**Game state**: in memory (for example, only **one active match**). Minimum structure:
+
+```text
+Game {
+  UUID id; // can be fixed if you keep a single match
+  String playerXName;
+  String playerOName;
+  char[] board; // size 9, with ' ', 'X', 'O'
+  char currentPlayer; // 'X' or 'O'
+  GameStatus status; // IN_PROGRESS, X_WON, O_WON, DRAW
+}
+```
+
+### REST endpoints (examples)
+
+Base path: `/api/v1/tictactoe`
+
+1. **Start match / set players**
+
+* `POST /start`
+* Request:
+
+```json
+{ "playerXName": "Ana", "playerOName": "Bruno" }
+```
+
+* Validations: required names, 2 distinct players.
+* Response `201 Created`:
+
+```json
+{
+  "gameId": "uuid",
+  "board": [" ", " ", " ", " ", " ", " ", " ", " ", " "],
+  "currentPlayer": "X",
+  "status": "IN_PROGRESS",
+  "players": { "X": "Ana", "O": "Bruno" }
+}
+```
+
+2. **Make a move**
+
+* `POST /move`
+* Request:
+
+```json
+{ "position": 5 } // 1 to 9
+```
+
+* Rules:
+
+  * Position 1..9.
+  * Cell must be empty.
+  * Respect the turn (`currentPlayer`).
+  * After marking, check win/draw; otherwise, switch player.
+* Response `200 OK` (or `409`/`400` on errors):
+
+```json
+{
+  "board": [" ", " ", " ", " ", "X", " ", " ", " ", " "],
+  "currentPlayer": "O",
+  "status": "IN_PROGRESS"
+}
+```
+
+3. **Get board**
+
+* `GET /board`
+* Response `200 OK`:
+
+```json
+{
+  "board": ["X","O","X"," ","O"," "," ","X"," "],
+  "status": "IN_PROGRESS",
+  "currentPlayer": "O"
+}
+```
+
+4. **Get status**
+
+* `GET /status`
+* Response `200 OK`:
+
+```json
+{ "status": "X_WON", "winner": "X", "winnerName": "Ana" }
+```
+
+5. **Play again (reset)**
+
+* `POST /reset`
+
+  * Reset the board and `status` to `IN_PROGRESS`.
+  * **Optional parameter** `keepPlayers` (boolean) to keep names.
+* Response `200 OK` with the new initial state.
+
+### Validations & Error messages
+
+* Use **Jakarta Validation** on DTOs (`@NotBlank`, `@Min`, `@Max`, etc.).
+* Errors must follow the **existing project pattern** via `ErrorHandlingControllerAdvice` and `CustomErrorType`:
+
+```json
+{
+  "timestamp": "ISO-8601",
+  "message": "Error description",
+  "errors": ["detail 1", "detail 2"]
+}
+```
+
+* Example messages:
+
+  * `"Player names are required and must be distinct."`
+  * `"Position must be between 1 and 9."`
+  * `"Cell already occupied."`
+  * `"It is not this player's turn."` (if you choose to receive the player in the request)
+  * `"Match already finished."`
+
+### Win rules
+
+* Consider winning combinations by indices of the `board` array (0-based):
+
+  * Rows: `[0,1,2]`, `[3,4,5]`, `[6,7,8]`
+  * Columns: `[0,3,6]`, `[1,4,7]`, `[2,5,8]`
+  * Diagonals: `[0,4,8]`, `[2,4,6]`
+
+### TDD and Evaluation criteria
+
+Implement **tests first**, then the code:
+
+* **Unit tests (in the `service` layer)**: cover
+
+  * Game start with valid/invalid names.
+  * Valid move (marking and turn switching).
+  * Position outside 1..9.
+  * Occupied cell.
+  * Win detection (rows, columns, diagonals).
+  * Draw detection after 9 moves.
+  * Reset keeping/removing names.
+* **Integration tests (REST controllers)** with **MockMvc + Mockito**:
+
+  * `POST /start`:
+
+    * 201 on success; 400 with appropriate message on invalid input.
+  * `POST /move`:
+
+    * 200 on success; 400/409 for validations (position, occupied cell, order of play); 409 if match already finished.
+  * `GET /board` and `GET /status`:
+
+    * 200 and bodies as specified.
+  * `POST /reset`:
+
+    * 200 with new state.
+* **Standardization (Slide 15)**:
+
+  * Name cases following “Given/When/Then” in **DisplayName**.
+  * Use `@DisplayName` and `@Tag("unit")` / `@Tag("integration")`.
+* **Coverage**: generate **Jacoco** with `gradle test` and **target ≥ 80%** (there is already a configuration—keep/adjust as needed).
+
+### DTOs (example)
+
+* `StartGameRequest { @NotBlank playerXName; @NotBlank playerOName; }`
+* `MoveRequest { @NotNull @Min(1) @Max(9) Integer position; }`
+* `BoardResponse { List<String> board; String status; String currentPlayer; }`
+* `StatusResponse { String status; String winner; String winnerName; }`
+
+### Documentation (springdoc)
+
+* Expose **Swagger UI** (`/swagger-ui.html`) describing endpoints, requests/responses, and error codes.
+* **README.md**: update with
+
+  * Functional requirements (as above),
+  * How to run (`./gradlew bootRun`),
+  * How to test (`./gradlew test` + Jacoco report path),
+  * TDD strategy and examples of `@Tag` / `@DisplayName`.
+
+### Definition of Done (DoD)
+
+* All endpoints working with standardized validations and error messages.
+* Unit and integration tests passing; **coverage ≥ 80%** via Jacoco.
+* Swagger UI documenting endpoints.
+* README updated with requirements and instructions.
+* Original project structure and existing technologies preserved.
+* Separate commits for **code** and **tests** (for authorship evaluation).
+* Keep the final implementation on the `master` branch (do not delete the Feedback PR).
+
+**Important**:
+
+* **Do not introduce a database** to persist the game; state can be in memory.
+* **Do not remove** existing classes/beans in `config/` and `exception/`.
+* If needed, create specific exceptions (e.g., `GameValidationException`) **following the project’s pattern** so they are handled by the `ControllerAdvice`.
+
+Deliver the complete code (controllers, services, DTOs, tests, Swagger documentation) and the **test pipeline** running via Gradle.
